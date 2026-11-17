@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEON BAY — an open-world crime game</title>
+<style>
+  /* Look plan: night, neon and chrome. Six colours only: night, asphalt, panel, ink, muted, and three neon inks. */
+  :root {
+    --night: #07060f;
+    --asphalt: #121020;
+    --panel: rgba(12, 10, 24, 0.78);
+    --ink: #f5f0ff;
+    --muted: #a7a0c2;
+    --pink: #ff3ea5;
+    --cyan: #35e7ff;
+    --amber: #ffc25c;
+    --green: #57f2a4;
+    --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-readout: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: var(--night);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    -webkit-font-smoothing: antialiased;
+  }
+  #app, #app canvas { position: fixed; inset: 0; display: block; }
+  #boot-screen {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    background:
+      radial-gradient(ellipse at 50% 30%, rgba(255, 62, 165, 0.18), transparent 60%),
+      var(--night);
+    z-index: 40;
+  }
+  .boot-card { width: min(360px, 82vw); text-align: center; }
+  .boot-title { margin: 8px 0 14px; font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
+  .boot-bar { height: 3px; background: rgba(255, 255, 255, 0.12); border-radius: 2px; overflow: hidden; }
+  .boot-bar i { display: block; width: 40%; height: 100%; background: linear-gradient(90deg, var(--pink), var(--cyan)); animation: bootSlide 1.1s ease-in-out infinite; }
+  @keyframes bootSlide { 0% { transform: translateX(-100%); } 100% { transform: translateX(260%); } }
+  .boot-note { margin-top: 12px; font-family: var(--font-readout); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+  #boot-error {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 50;
+    width: min(560px, 86vw);
+    padding: 18px 20px;
+    border: 1px solid var(--pink);
+    border-radius: 10px;
+    background: rgba(40, 6, 22, 0.96);
+    color: #ffd7ea;
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  body.boot-failed #hud { display: none; }
+  #app canvas { width: 100%; height: 100%; outline: none; }
+  button { font: inherit; color: inherit; }
+  [hidden] { display: none !important; }
+
+  /* ---------- HUD: always on, always labelled ---------- */
+  #hud { position: fixed; inset: 0; pointer-events: none; user-select: none; }
+  .hud-panel {
+    background: var(--panel);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 10px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(6px);
+  }
+  .hud-label {
+    font-family: var(--font-readout);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  #hud-left {
+    position: absolute;
+    left: 22px;
+    top: 20px;
+    width: 246px;
+    padding: 12px 14px 12px;
+  }
+  .vitals { display: grid; gap: 7px; }
+  .vital-row { display: grid; grid-template-columns: 46px 1fr 34px; align-items: center; gap: 8px; }
+  .vital-row .hud-label { text-align: right; }
+  .vital-track {
+    height: 10px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.10);
+    overflow: hidden;
+    position: relative;
+  }
+  .vital-fill { position: absolute; inset: 0 auto 0 0; width: 100%; transition: width 120ms linear; }
+  #health-fill { background: linear-gradient(90deg, #ff5f7a, #ff2f63); }
+  #armor-fill { background: linear-gradient(90deg, #35e7ff, #2f8bff); }
+  .vital-num { font-family: var(--font-readout); font-size: 11px; color: var(--ink); text-align: right; }
+  #cash-row {
+    margin-top: 10px;
+    padding-top: 9px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+  #cash { font-family: var(--font-readout); font-size: 22px; font-weight: 600; color: var(--green); letter-spacing: -0.02em; }
+  #cash-label { font-size: 10px; letter-spacing: 0.18em; color: var(--muted); font-family: var(--font-readout); }
+
+  #hud-right {
+    position: absolute;
+    right: 22px;
+    top: 20px;
+    width: 246px;
+    padding: 12px 14px;
+    text-align: right;
+  }
+  #wanted-row { display: flex; align-items: center; justify-content: space-between; }
+  #stars { display: flex; gap: 4px; font-size: 19px; line-height: 1; letter-spacing: 2px; }
+  #stars span { color: rgba(255, 255, 255, 0.16); text-shadow: none; }
+  #stars span.on { color: var(--amber); text-shadow: 0 0 10px rgba(255, 194, 92, 0.85); }
+  #stars.alert span.on { animation: starPulse 900ms ease-in-out infinite alternate; }
+  @keyframes starPulse { from { opacity: 0.55; } to { opacity: 1; } }
+  #clock { font-family: var(--font-readout); font-size: 26px; letter-spacing: 0.02em; margin-top: 10px; }
+  #district { font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--pink); margin-top: 2px; }
+
+  #objective-panel {
+    position: absolute;
+    left: 50%;
+    top: 18px;
+    transform: translateX(-50%);
+    width: min(520px, 42vw);
+    padding: 9px 16px 10px;
+    text-align: center;
+  }
+  #objective-top { display: flex; align-items: baseline; justify-content: center; gap: 10px; }
+  #mission-name { font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--cyan); }
+  #mission-timer { font-family: var(--font-readout); font-size: 13px; color: var(--amber); }
+  #objective-text { margin-top: 3px; font-size: 15px; font-weight: 500; letter-spacing: 0.01em; }
+
+  #minimap-wrap {
+    position: absolute;
+    left: 22px;
+    bottom: 22px;
+    width: 204px;
+    padding: 8px 8px 6px;
+  }
+  #minimap { display: block; width: 188px; height: 188px; border-radius: 6px; background: #0a0814; }
+  #minimap-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; padding: 0 2px; }
+  #minimap-scale { font-family: var(--font-readout); font-size: 9px; color: var(--muted); }
+
+  #minimap-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 9px;
+    margin: 5px 2px 1px;
+    font-family: var(--font-readout);
+    font-size: 9px;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+  #minimap-legend span { display: inline-flex; align-items: center; gap: 3px; }
+  #minimap-legend i { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+
+  #weapon-panel {
+    position: absolute;
+    right: 22px;
+    bottom: 22px;
+    min-width: 190px;
+    padding: 12px 14px;
+    text-align: right;
+  }
+  #weapon-name { font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); }
+  #ammo { font-family: var(--font-readout); font-size: 36px; line-height: 1.05; letter-spacing: -0.03em; }
+  #ammo-reserve { font-size: 16px; color: var(--muted); }
+  #ammo.empty #ammo-mag { color: var(--pink); }
+  #reload-note { font-size: 10px; letter-spacing: 0.16em; color: var(--amber); height: 12px; text-transform: uppercase; }
+
+  #speed-panel {
+    position: absolute;
+    left: 50%;
+    bottom: 22px;
+    transform: translateX(-50%);
+    padding: 7px 18px;
+    text-align: center;
+    min-width: 150px;
+  }
+  #speed-value { font-family: var(--font-readout); font-size: 24px; letter-spacing: -0.02em; }
+  #speed-unit { font-size: 10px; letter-spacing: 0.2em; color: var(--muted); text-transform: uppercase; }
+
+  #reticle {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 26px;
+    height: 26px;
+    transform: translate(-50%, -50%);
+    opacity: 0;
+    transition: opacity 120ms linear;
+  }
+  #reticle.on { opacity: 0.9; }
+  #reticle i { position: absolute; background: var(--cyan); box-shadow: 0 0 8px rgba(53,231,255,0.9); }
+  #reticle i:nth-child(1) { left: 12px; top: 0; width: 2px; height: 8px; }
+  #reticle i:nth-child(2) { left: 12px; bottom: 0; width: 2px; height: 8px; }
+  #reticle i:nth-child(3) { top: 12px; left: 0; width: 8px; height: 2px; }
+  #reticle i:nth-child(4) { top: 12px; right: 0; width: 8px; height: 2px; }
+  #reticle u { position: absolute; left: 12px; top: 12px; width: 2px; height: 2px; background: var(--pink); border-radius: 50%; }
+
+  #hint {
+    position: absolute;
+    left: 50%;
+    bottom: 92px;
+    transform: translateX(-50%);
+    padding: 6px 14px;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    background: rgba(7, 6, 15, 0.72);
+    border: 1px solid rgba(53, 231, 255, 0.35);
+    border-radius: 999px;
+    color: var(--cyan);
+    white-space: nowrap;
+  }
+  #toast {
+    position: absolute;
+    left: 50%;
+    top: 118px;
+    transform: translateX(-50%);
+    display: grid;
+    gap: 6px;
+    justify-items: center;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8);
+  }
+  #toast div { padding: 5px 14px; border-radius: 999px; background: rgba(7, 6, 15, 0.7); border: 1px solid rgba(255,62,165,0.35); }
+  #toast div.good { border-color: rgba(87, 242, 164, 0.5); color: var(--green); }
+  #toast div.warn { border-color: rgba(255, 194, 92, 0.5); color: var(--amber); }
+
+  #error-note {
+    position: absolute;
+    left: 50%;
+    bottom: 140px;
+    transform: translateX(-50%);
+    max-width: 640px;
+    padding: 8px 14px;
+    background: rgba(90, 8, 34, 0.88);
+    border: 1px solid var(--pink);
+    border-radius: 8px;
+    font-family: var(--font-readout);
+    font-size: 11px;
+    line-height: 1.5;
+    color: #ffd7ea;
+    pointer-events: none;
+  }
+  #vignette {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 52%, rgba(255, 20, 70, 0.34) 100%);
+    opacity: 0;
+    transition: opacity 200ms linear;
+  }
+
+  /* Hitmarker: a four-tick pop at the reticle when a shot lands. hud.js toggles .on. */
+  #hitmarker {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 34px;
+    height: 34px;
+    transform: translate(-50%, -50%) scale(0.82);
+    opacity: 0;
+    transition: opacity 90ms linear, transform 90ms ease-out;
+    pointer-events: none;
+  }
+  #hitmarker.on { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  #hitmarker i {
+    position: absolute;
+    width: 9px;
+    height: 2px;
+    background: var(--amber);
+    box-shadow: 0 0 8px rgba(255, 194, 92, 0.95);
+  }
+  #hitmarker i:nth-child(1) { left: 0; top: 6px; transform: rotate(45deg); }
+  #hitmarker i:nth-child(2) { right: 0; top: 6px; transform: rotate(-45deg); }
+  #hitmarker i:nth-child(3) { left: 0; bottom: 6px; transform: rotate(-45deg); }
+  #hitmarker i:nth-child(4) { right: 0; bottom: 6px; transform: rotate(45deg); }
+
+  /* Objective progress chip: "1/3 drops" sits inside the objective card. */
+  #mission-progress {
+    font-family: var(--font-readout);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border: 1px solid rgba(87, 242, 164, 0.45);
+    border-radius: 999px;
+    color: var(--green);
+    white-space: nowrap;
+  }
+  #mission-progress:empty { display: none; }
+
+  /* Mode badge: DEMO / CORE, bottom-centre above the speed readout, so both states are visible. */
+  #mode-badge {
+    position: absolute;
+    left: 50%;
+    bottom: 62px;
+    transform: translateX(-50%);
+    padding: 3px 10px;
+    border: 1px solid rgba(255, 62, 165, 0.6);
+    border-radius: 999px;
+    background: rgba(12, 10, 24, 0.72);
+    font-family: var(--font-readout);
+    font-size: 9px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--pink);
+  }
+  #mode-badge[hidden] { display: none; }
+  body[data-demo="1"] #mode-badge { color: var(--amber); border-color: rgba(255, 194, 92, 0.6); }
+  body[data-core="1"] #mode-badge { color: var(--cyan); border-color: rgba(53, 231, 255, 0.55); }
+
+  /* ?shot= staging: the boot card and title chrome must never sit on a captured frame. The flag is
+     set on <html> by the inline script below, before first paint, so nothing flashes into a shot. */
+  html[data-shot] #boot-screen,
+  html[data-shot] #menu { display: none !important; }
+  html[data-shot] #hint { display: none !important; }
+  html[data-shot] #toast div { animation: none; }
+
+  /* ?core=1: the optional half (traffic, peds, police, audio) is off. Say so on the boot card and
+     in the badge, so a core-only fallback never looks like a broken build. */
+  html[data-core] #mode-badge { display: block; }
+
+  /* ---------- Overlays ---------- */
+  .overlay {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 28px;
+    background:
+      radial-gradient(ellipse at 30% 10%, rgba(255, 62, 165, 0.20), transparent 55%),
+      radial-gradient(ellipse at 80% 90%, rgba(53, 231, 255, 0.14), transparent 55%),
+      rgba(5, 4, 12, 0.72);
+    backdrop-filter: blur(3px);
+    z-index: 20;
+  }
+  .overlay[hidden] { display: none; }
+  .panel {
+    width: min(520px, 100%);
+    padding: 30px 32px 28px;
+    background: linear-gradient(160deg, rgba(22, 16, 40, 0.97), rgba(9, 8, 18, 0.97));
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 14px;
+    box-shadow: 0 30px 90px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+  .kicker { font-family: var(--font-readout); font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--pink); }
+  #title {
+    margin: 8px 0 2px;
+    font-size: 58px;
+    line-height: 0.94;
+    letter-spacing: -0.03em;
+    font-weight: 800;
+    text-transform: uppercase;
+    background: linear-gradient(100deg, #fff 10%, #ffc9e6 42%, var(--pink) 70%, var(--cyan) 105%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .subtitle { margin: 6px 0 18px; color: var(--muted); font-size: 14px; line-height: 1.5; max-width: 42ch; }
+  .menu-buttons { display: grid; gap: 8px; }
+  .btn {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 15px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    border-radius: 9px;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
+  }
+  .btn:hover { background: rgba(255, 62, 165, 0.16); border-color: rgba(255, 62, 165, 0.65); transform: translateX(2px); }
+  .btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+  .btn.primary { background: linear-gradient(100deg, var(--pink), #ff7ac4); border-color: var(--pink); color: #14000c; }
+  .btn.primary:hover { background: linear-gradient(100deg, #ff6bb8, #ffc0e2); }
+  .btn small { font-family: var(--font-readout); font-size: 10px; letter-spacing: 0.14em; opacity: 0.7; text-transform: uppercase; font-weight: 500; }
+  .btn[disabled] { opacity: 0.35; cursor: not-allowed; transform: none; }
+  .menu-foot { display: flex; justify-content: space-between; margin-top: 18px; font-family: var(--font-readout); font-size: 10px; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
+
+  .keys { margin: 0; padding: 0; list-style: none; display: grid; gap: 7px; font-size: 13px; color: var(--muted); }
+  .keys li { display: flex; align-items: center; gap: 10px; }
+  .keys b { color: var(--ink); font-weight: 500; }
+  kbd {
+    min-width: 26px;
+    padding: 2px 7px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.06);
+    font-family: var(--font-readout);
+    font-size: 11px;
+    color: var(--ink);
+    text-align: center;
+  }
+  .panel h2 { margin: 6px 0 10px; font-size: 30px; letter-spacing: -0.01em; line-height: 1.1; }
+  .panel p { color: var(--muted); font-size: 14px; line-height: 1.6; margin: 0 0 14px; }
+  .briefing-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  .briefing-goal {
+    padding: 12px 14px;
+    border-left: 3px solid var(--cyan);
+    background: rgba(53, 231, 255, 0.07);
+    border-radius: 0 8px 8px 0;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .briefing-goal b { color: var(--cyan); font-family: var(--font-readout); font-size: 10px; letter-spacing: 0.2em; display: block; margin-bottom: 4px; text-transform: uppercase; }
+  .briefing-reward { font-family: var(--font-readout); font-size: 12px; color: var(--green); letter-spacing: 0.08em; }
+  .brief-steps {
+    margin: 2px 0 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 5px;
+    counter-reset: step;
+  }
+  .brief-steps:empty { display: none; }
+  .brief-step {
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--muted);
+  }
+  .brief-step i {
+    font-family: var(--font-readout);
+    font-style: normal;
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    color: var(--cyan);
+    opacity: 0.85;
+  }
+  .brief-step span { flex: 1; }
+  .overlay-wide .panel { width: min(760px, 100%); }
+  .shot-briefing .panel { width: min(480px, 46vw); margin-right: auto; margin-left: 5vw; }
+  .shot-briefing { place-items: center start; background: linear-gradient(90deg, rgba(5,4,12,0.62) 0%, rgba(5,4,12,0.28) 55%, transparent 100%); backdrop-filter: none; }
+  .overlay-clear { background: rgba(5, 4, 12, 0.35); backdrop-filter: none; }
+  .overlay-clear .panel { background: linear-gradient(160deg, rgba(22, 16, 40, 0.82), rgba(9, 8, 18, 0.82)); }
+
+  .menu-credit { margin-top: 10px; font-size: 10px; line-height: 1.55; letter-spacing: 0.03em; color: var(--muted); opacity: 0.8; }
+  #has-save { color: var(--cyan); }
+  @media (max-width: 900px) {
+    #objective-panel { width: 40vw; }
+    #hud-left, #hud-right { width: 200px; }
+  }
+</style>
+</head>
+<body>
+<script>
+  // One synchronous read of the query string before first paint. It mirrors main.js's flags so the
+  // shot and core chrome is styled from frame zero: ?shot=<name> hides the title and boot cards,
+  // ?core=1 marks the page as the reduced build. main.js owns all actual game behaviour.
+  (function markMode() {
+    try {
+      var params = new URLSearchParams(window.location.search);
+      if (params.get('shot')) document.documentElement.setAttribute('data-shot', params.get('shot'));
+      if (params.get('core') === '1') document.documentElement.setAttribute('data-core', '1');
+    } catch (error) {
+      /* an unparseable query string just means the default title flow */
+    }
+  })();
+</script>
+<div id="app"></div>
+
+<div id="boot-screen" role="status" aria-live="polite">
+  <div class="boot-card">
+    <div class="kicker">NEON BAY</div>
+    <div class="boot-title">Waking the bay</div>
+    <div class="boot-bar"><i></i></div>
+    <div class="boot-note" id="boot-note">Building the city grid, the marina and the neon.</div>
+  </div>
+</div>
+<div id="boot-error" role="alert" hidden></div>
+
+<div id="hud" aria-hidden="true">
+  <div id="hud-left" class="hud-panel">
+    <div class="vitals">
+      <div class="vital-row">
+        <span class="hud-label">Health</span>
+        <span class="vital-track"><span id="health-fill" class="vital-fill"></span></span>
+        <span id="health-num" class="vital-num">100</span>
+      </div>
+      <div class="vital-row">
+        <span class="hud-label">Armor</span>
+        <span class="vital-track"><span id="armor-fill" class="vital-fill"></span></span>
+        <span id="armor-num" class="vital-num">0</span>
+      </div>
+    </div>
+    <div id="cash-row">
+      <span id="cash-label">CASH</span>
+      <span id="cash">$0</span>
+    </div>
+  </div>
+
+  <div id="hud-right" class="hud-panel">
+    <div id="wanted-row">
+      <span class="hud-label">Wanted</span>
+      <span id="stars"><span>★</span><span>★</span><span>★</span><span>★</span><span>★</span></span>
+    </div>
+    <div id="clock">21:40</div>
+    <div id="district">Neon Bay · Marina</div>
+  </div>
+
+  <div id="objective-panel" class="hud-panel" hidden>
+    <div id="objective-top">
+      <span class="hud-label">Objective</span>
+      <span id="mission-name">Hot Cargo</span>
+      <span id="mission-timer">01:30</span>
+      <span id="mission-progress"></span>
+    </div>
+    <div id="objective-text">Reach the drop before the timer runs out.</div>
+  </div>
+
+  <div id="minimap-wrap" class="hud-panel">
+    <canvas id="minimap" width="188" height="188"></canvas>
+    <div id="minimap-foot">
+      <span class="hud-label" style="color: var(--cyan)">Neon Bay · Map</span>
+      <span id="minimap-scale">N ▲</span>
+    </div>
+    <div id="minimap-legend">
+      <span><i style="background:#35e7ff"></i>You</span>
+      <span><i style="background:#7fa8ff"></i>Police</span>
+      <span><i style="background:#ffc25c"></i>Mission</span>
+      <span><i style="background:#e7e1f5"></i>Traffic</span>
+    </div>
+  </div>
+
+  <div id="weapon-panel" class="hud-panel">
+    <div id="weapon-name">Pistol</div>
+    <div id="ammo"><span id="ammo-mag">12</span><span id="ammo-reserve"> / 60</span></div>
+    <div id="reload-note"></div>
+  </div>
+
+  <div id="speed-panel" class="hud-panel" hidden>
+    <div id="speed-value">0</div>
+    <div id="speed-unit">km/h</div>
+  </div>
+
+  <div id="reticle"><i></i><i></i><i></i><i></i><u></u></div>
+  <div id="hitmarker" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+  <div id="mode-badge" hidden>Demo</div>
+  <div id="hint" hidden></div>
+  <div id="toast"></div>
+  <div id="error-note" hidden></div>
+</div>
+<div id="vignette"></div>
+
+<div id="menu" class="overlay">
+  <section class="panel" role="dialog" aria-modal="true" aria-labelledby="title">
+    <div class="kicker">A make.fun original · gta6-01</div>
+    <h1 id="title">Neon Bay</h1>
+    <p class="subtitle">A coastal city that never sleeps. Wheel a stolen coupe through the marina, outrun the bay police, and climb from courier to harbour legend.</p>
+    <div class="menu-buttons">
+      <button id="btn-new" class="btn primary" type="button">New Game <small>Start the arc</small></button>
+      <button id="btn-continue" class="btn" type="button">Continue <small id="has-save">No save yet</small></button>
+      <button id="btn-demo" class="btn" type="button">Demo Mode <small>Attract loop · wanted 3 · police chase</small></button>
+      <button id="btn-controls" class="btn" type="button">Controls <small>Keyboard + mouse</small></button>
+    </div>
+      <div class="menu-foot"><span>Neon Bay · 2026</span><span id="build-note">Original engine · three.js</span></div>
+    <div class="menu-credit">Original city, story and art. Not affiliated with any commercial game.</div>
+  </section>
+</div>
+
+<div id="briefing" class="overlay" hidden>
+  <section class="panel" role="dialog" aria-modal="true" aria-labelledby="briefing-title">
+    <div class="kicker" id="briefing-tag">Mission briefing</div>
+    <h2 id="briefing-title">Hot Cargo</h2>
+    <div class="briefing-grid">
+      <p id="briefing-body">A courier van is sitting on the marina lot with a load of bootleg chips. Move it before the harbour crew wakes up.</p>
+      <div class="briefing-goal"><b>Objective</b><span id="briefing-goal">Reach the pickup, then hit every drop before the timer dies.</span></div>
+      <ol id="briefing-steps" class="brief-steps"></ol>
+      <div class="briefing-reward" id="briefing-reward">Reward $1,500</div>
+    </div>
+    <div class="menu-buttons" style="margin-top: 18px">
+      <button id="btn-briefing-go" class="btn primary" type="button">Let's ride <small>Enter</small></button>
+      <button id="btn-briefing-later" class="btn" type="button">Back <small>Esc</small></button>
+    </div>
+  </section>
+</div>
+
+<div id="pause" class="overlay" hidden>
+  <section class="panel" role="dialog" aria-modal="true">
+    <div class="kicker">Paused</div>
+    <h2>Take a breath</h2>
+    <p>The bay can wait. Your progress is saved when you return to the title screen.</p>
+    <div class="menu-buttons">
+      <button id="btn-resume" class="btn primary" type="button">Resume <small>Esc</small></button>
+      <button id="btn-pause-controls" class="btn" type="button">Controls</button>
+      <button id="btn-quit" class="btn" type="button">Save &amp; Title <small>Saves cash + wanted</small></button>
+    </div>
+  </section>
+</div>
+
+<div id="controls" class="overlay" hidden>
+  <section class="panel" role="dialog" aria-modal="true">
+    <div class="kicker">Controls</div>
+    <h2>Drive. Walk. Survive.</h2>
+    <ul class="keys">
+      <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> <b>On foot</b> move · <b>driving</b> throttle / steer</li>
+      <li><kbd>Shift</kbd> Sprint on foot · boost in a car</li>
+      <li><kbd>Space</kbd> Jump on foot · handbrake in a car</li>
+      <li><kbd>E</kbd> Enter / exit the nearest car (steals it; the driver bolts)</li>
+      <li><kbd>Mouse</kbd> Look around · <kbd>Click</kbd> fire the pistol</li>
+      <li><kbd>F</kbd> Melee swing · <kbd>R</kbd> Reload</li>
+      <li><kbd>M</kbd> Mute audio · <kbd>Esc</kbd> Pause</li>
+      <li><kbd>H</kbd> Hideout clears your wanted stars</li>
+    </ul>
+    <div class="menu-buttons" style="margin-top: 18px">
+      <button id="btn-controls-back" class="btn primary" type="button">Back</button>
+    </div>
+  </section>
+</div>
+
+<div id="endcard" class="overlay overlay-clear" hidden>
+  <section class="panel" role="dialog" aria-modal="true">
+    <div class="kicker" id="end-kicker">Mission complete</div>
+    <h2 id="end-title">Hot Cargo delivered</h2>
+    <p id="end-copy">Clean run. The harbour crew will remember the name.</p>
+    <div class="menu-buttons">
+      <button id="btn-end-continue" class="btn primary" type="button">Continue</button>
+      <button id="btn-end-retry" class="btn" type="button">Retry mission</button>
+    </div>
+  </section>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.min.js"
+  }
+}
+</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
