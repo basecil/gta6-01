@@ -16,6 +16,28 @@ export const CITY_SPEC = {
   waterZ: 196,
 };
 
+// Five named districts: a plain axis-aligned tiling of the playable square, so every point in
+// the city belongs to exactly one of them and the HUD never has to guess. The water is south of
+// z=196, so the harbour runs along the east waterfront (container docks, Pier 9) and the beach
+// takes the south coast; downtown keeps the Neon Arch and Bay Tower, the hills the west edge and
+// the airport the north runway strip.
+export const DISTRICTS = [
+  { name: 'Hills', minX: -200, maxX: -80, minZ: -200, maxZ: 80 },
+  { name: 'Airport', minX: -80, maxX: 80, minZ: -200, maxZ: -100 },
+  { name: 'Downtown', minX: -80, maxX: 80, minZ: -100, maxZ: 80 },
+  { name: 'Beachfront', minX: -200, maxX: 80, minZ: 80, maxZ: 200 },
+  { name: 'Harbor', minX: 80, maxX: 200, minZ: -200, maxZ: 200 },
+];
+
+// The one lookup every module shares: rects are inclusive on the low edge and exclusive on the
+// high one, and the first match wins because the tiling has no overlaps.
+export function districtAt(x, z) {
+  for (const district of DISTRICTS) {
+    if (x >= district.minX && x < district.maxX && z >= district.minZ && z < district.maxZ) return district.name;
+  }
+  return 'Downtown';
+}
+
 export const PALETTE = {
   skyTop: 0x0a0718,
   skyHorizon: 0x2a1338,
@@ -714,6 +736,9 @@ export function createCity(scene, seed) {
     roads,
     roadLines,
     map,
+    districts: DISTRICTS,
+    DISTRICTS,
+    districtAt,
     parkedSpots,
     landmarks,
     signs: allSigns,

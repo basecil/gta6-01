@@ -14,6 +14,8 @@ const STAR_CRIMES = {
   ram: 1,
 };
 
+export const HELI_ORBIT = { radius: 45, height: 55, speed: 0.22 };
+
 function lampGlowTexture() {
   const canvas = document.createElement('canvas');
   canvas.width = 64;
@@ -28,8 +30,113 @@ function lampGlowTexture() {
   return new THREE.CanvasTexture(canvas);
 }
 
+// The air unit: a box-and-cylinder gunship with a lit cabin, a tail boom, skids and two rotors.
+// Every part is a primitive, so the silhouette reads from 90 m and costs a handful of materials.
+// `spot` is an empty anchor under the nose where main.js hangs the searchlight rig.
+export function createHeli() {
+  const group = new THREE.Group();
+  group.rotation.order = 'YXZ';
+
+  const shell = new THREE.MeshLambertMaterial({ color: 0xe8eef7 });
+  const navy = new THREE.MeshLambertMaterial({ color: 0x1b2b55 });
+  const dark = new THREE.MeshLambertMaterial({ color: 0x11121b });
+  const glass = new THREE.MeshLambertMaterial({ color: 0x0d2036, emissive: 0x0a2440, emissiveIntensity: 0.9 });
+  const red = new THREE.MeshBasicMaterial({ color: 0xff2f52, toneMapped: false });
+  const blue = new THREE.MeshBasicMaterial({ color: 0x35a7ff, toneMapped: false });
+  const lamp = new THREE.MeshBasicMaterial({ color: 0xdff2ff, toneMapped: false });
+  const blade = new THREE.MeshLambertMaterial({ color: 0x1a1c26 });
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.45, 5.4), shell);
+  group.add(body);
+  const belly = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.5, 4.4), navy);
+  belly.position.y = -0.72;
+  group.add(belly);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(1.94, 0.26, 3.4), navy);
+  stripe.position.y = 0.12;
+  group.add(stripe);
+  const windscreen = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.62, 0.16), glass);
+  windscreen.position.set(0, 0.34, 2.68);
+  windscreen.rotation.x = -0.18;
+  group.add(windscreen);
+  for (const side of [-1, 1]) {
+    const window = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.58, 1.7), glass);
+    window.position.set(side * 0.96, 0.28, 0.5);
+    group.add(window);
+  }
+
+  // Tail boom, fin and tail rotor (spins around X so the disc faces sideways).
+  const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.38, 6.4, 10), shell);
+  boom.rotation.x = Math.PI / 2;
+  boom.position.set(0, 0.3, -5.1);
+  group.add(boom);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.6, 0.92), navy);
+  fin.position.set(0, 1.0, -7.9);
+  group.add(fin);
+  const tailRotor = new THREE.Group();
+  tailRotor.position.set(0.46, 1.0, -7.9);
+  for (let index = 0; index < 2; index += 1) {
+    const tailBlade = new THREE.Mesh(new THREE.BoxGeometry(0.06, 2.3, 0.2), blade);
+    tailBlade.rotation.x = (index * Math.PI) / 2;
+    tailRotor.add(tailBlade);
+  }
+  group.add(tailRotor);
+
+  // Main rotor: a hub and two crossed blades that give the four-blade read.
+  const rotor = new THREE.Group();
+  rotor.position.set(0, 1.16, -0.1);
+  rotor.add(new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.3, 10), dark));
+  for (let index = 0; index < 2; index += 1) {
+    const mainBlade = new THREE.Mesh(new THREE.BoxGeometry(7.2, 0.07, 0.36), blade);
+    mainBlade.rotation.y = (index * Math.PI) / 2;
+    rotor.add(mainBlade);
+    const tip = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.09, 0.38), index === 0 ? red : blue);
+    tip.position.x = 3.5;
+    mainBlade.add(tip);
+  }
+  group.add(rotor);
+
+  // Skids, struts and the searchlight housing under the nose.
+  for (const side of [-1, 1]) {
+    const skid = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 3.9), dark);
+    skid.position.set(side * 1.06, -1.38, 0.15);
+    group.add(skid);
+    for (const z of [-1.2, 1.0]) {
+      const strut = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.72, 0.12), dark);
+      strut.position.set(side * 0.95, -1.02, z);
+      strut.rotation.z = side * 0.26;
+      group.add(strut);
+    }
+  }
+  const housing = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.33, 0.42, 10), dark);
+  housing.position.set(0, -0.9, 2.25);
+  group.add(housing);
+  const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.07, 10), lamp);
+  lens.position.set(0, -1.12, 2.25);
+  group.add(lens);
+
+  // Beacons and a cabin lamp, so the body glows against the night sky.
+  const beaconRed = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), red);
+  beaconRed.position.set(0, 0.95, -2.3);
+  group.add(beaconRed);
+  const beaconBlue = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 6), blue);
+  beaconBlue.position.set(0, 1.62, -7.6);
+  group.add(beaconBlue);
+  const cabinLamp = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), lamp);
+  cabinLamp.position.set(0, -0.95, 0.9);
+  group.add(cabinLamp);
+
+  const spot = new THREE.Object3D();
+  spot.position.set(0, -1.12, 2.25);
+  group.add(spot);
+
+  group.visible = false;
+  return { mesh: group, rotor, tailRotor, spot };
+}
+
 export function createPolice(scene, city, options = {}) {
   const glow = lampGlowTexture();
+  let heliRig = null;
+  let lastPlayer = null;
   const state = {
     onCrime: null,
     wanted: 0,
@@ -42,6 +149,7 @@ export function createPolice(scene, city, options = {}) {
     spawnCooldown: 0,
     arrested: false,
     bustedTimer: 0,
+    heli: null,
   };
 
   const maxUnits = options.maxUnits ?? 4;
@@ -51,7 +159,11 @@ export function createPolice(scene, city, options = {}) {
     state.wanted = Math.max(0, Math.min(5, Math.round(level)));
     state.decay = 0;
     state.hiddenFor = 0;
+    if (state.wanted < 3) removeHeli();
     if (state.wanted === 0) clear();
+    // Staging calls this while the world is frozen, so the air unit has to arrive here rather
+    // than waiting for the next update tick.
+    else if (lastPlayer) syncHeli(lastPlayer);
   }
 
   function crime(amount, player, kind = 'steal') {
@@ -116,6 +228,60 @@ export function createPolice(scene, city, options = {}) {
     return officer;
   }
 
+  // Air support: one reused heli rig spawned at 3 stars and parked out of the scene otherwise.
+  // The position/orbit lives here so the minimap, pursued() and main.js all read one truth.
+  function spawnHeli(player, angle = 0.62) {
+    if (!heliRig) {
+      heliRig = createHeli();
+      scene.add(heliRig.mesh);
+    }
+    heliRig.mesh.visible = true;
+    state.heli = {
+      mesh: heliRig.mesh,
+      rotor: heliRig.rotor,
+      tailRotor: heliRig.tailRotor,
+      spot: heliRig.spot,
+      angle,
+      x: player.x,
+      y: HELI_ORBIT.height,
+      z: player.z,
+    };
+    placeHeli(player);
+    return state.heli;
+  }
+
+  function placeHeli(player) {
+    const heli = state.heli;
+    if (!heli) return;
+    heli.x = player.x + Math.cos(heli.angle) * HELI_ORBIT.radius;
+    heli.z = player.z + Math.sin(heli.angle) * HELI_ORBIT.radius;
+    heli.y = HELI_ORBIT.height + Math.sin(heli.angle * 2) * 1.1;
+    heli.mesh.position.set(heli.x, heli.y, heli.z);
+    // Nose (+Z) at the player, with a shallow bank into the orbit.
+    heli.mesh.rotation.y = Math.atan2(player.x - heli.x, player.z - heli.z);
+    heli.mesh.rotation.z = -0.13;
+  }
+
+  function removeHeli() {
+    if (state.heli) state.heli.mesh.visible = false;
+    state.heli = null;
+  }
+
+  // Called every update, and by shot staging so a frozen chase frame still gets its air unit.
+  function syncHeli(player, angle) {
+    if (player) lastPlayer = player;
+    if (!player || player.down || state.wanted < 3) {
+      removeHeli();
+      return null;
+    }
+    if (!state.heli) spawnHeli(player, angle);
+    else if (Number.isFinite(angle)) {
+      state.heli.angle = angle;
+      placeHeli(player);
+    }
+    return state.heli;
+  }
+
   function clear() {
     state.wanted = 0;
     state.decay = 0;
@@ -132,6 +298,7 @@ export function createPolice(scene, city, options = {}) {
     }
     state.units = [];
     state.officers = [];
+    removeHeli();
   }
 
   function hasLineOfSight(player, viewer) {
@@ -147,6 +314,7 @@ export function createPolice(scene, city, options = {}) {
 
   function update(dt, ctx) {
     const player = ctx.player;
+    lastPlayer = player;
     state.lastCrime = Math.max(0, state.lastCrime - dt);
     state.spawnCooldown = Math.max(0, state.spawnCooldown - dt);
 
@@ -172,6 +340,12 @@ export function createPolice(scene, city, options = {}) {
     if (state.units.some((unit) => unit.dead)) state.units = state.units.filter((unit) => !unit.dead);
     if (state.officers.some((officer) => officer.down && officer.deathTime > 12)) {
       state.officers = state.officers.filter((officer) => !(officer.down && officer.deathTime > 12));
+    }
+
+    // Air support arrives at 3 stars and leaves as soon as the heat drops back under it.
+    if (syncHeli(player)) {
+      state.heli.angle = (state.heli.angle + HELI_ORBIT.speed * dt) % (Math.PI * 2);
+      placeHeli(player);
     }
 
     // Spawn pursuit to match the wanted level.
@@ -298,8 +472,12 @@ export function createPolice(scene, city, options = {}) {
     update,
     spawnUnit,
     spawnOfficer,
+    syncHeli,
+    orbit: HELI_ORBIT,
     pursued() {
-      return state.units.filter((u) => !u.dead).length + state.officers.filter((o) => !o.down).length;
+      return state.units.filter((u) => !u.dead).length
+        + state.officers.filter((o) => !o.down).length
+        + (state.heli ? 1 : 0);
     },
   };
 }

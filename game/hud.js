@@ -23,8 +23,10 @@ export function createHud() {
   const cashEl = $('cash');
   const starEls = [...document.querySelectorAll('#stars span')];
   const starsEl = $('stars');
+  const airChip = $('air-support');
   const clockEl = $('clock');
   const districtEl = $('district');
+  const districtBanner = $('district-banner');
   const objectivePanel = $('objective-panel');
   const missionName = $('mission-name');
   const missionTimer = $('mission-timer');
@@ -52,13 +54,28 @@ export function createHud() {
   const off = offscreen.getContext('2d');
   let mapReady = false;
   let mapSpan = 128;
+  let mapCity = null;
 
   const cache = {
     health: -1, armor: -1, cash: -1, stars: -1, clock: '', ammo: -1, reserve: -1,
     district: '', mission: '', objective: '', timer: '', progress: '', speed: -1, reload: '', hint: '', weapon: '',
-    mode: '',
+    mode: '', air: null,
   };
   let hitFlash = 0;
+
+  // District entry card: the HUD tells the player when they cross into a new named district. It is
+  // a CSS transition on .on rather than a per-frame opacity write, and the timer is cleared on a
+  // re-entry so two quick crossings never leave the old card half-faded.
+  let bannerTimer = 0;
+  function showDistrictBanner(name) {
+    if (!districtBanner) return;
+    districtBanner.textContent = name;
+    districtBanner.classList.remove('on');
+    void districtBanner.offsetWidth;
+    districtBanner.classList.add('on');
+    clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(() => districtBanner.classList.remove('on'), 3000);
+  }
 
   function setText(el, key, value) {
     if (cache[key] === value) return;
@@ -94,12 +111,24 @@ export function createHud() {
       starEls.forEach((el, index) => el.classList.toggle('on', index < stars));
       starsEl.classList.toggle('alert', stars >= 3);
     },
+    // AIR SUPPORT sits under the stars and only exists while the heli is on station.
+    setAirSupport(on) {
+      if (!airChip || cache.air === on) return;
+      cache.air = on;
+      airChip.hidden = !on;
+    },
     setClock(hours, minutes) {
       const text = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
       setText(clockEl, 'clock', text);
     },
+    // The clock label and the map share one source of truth (city.DISTRICTS in main). The banner
+    // only announces a *change*: the first assignment of a load is silent, so staged shots open on
+    // a clean HUD and only live driving gets the entry title card.
     setDistrict(name) {
+      if (cache.district === name) return;
+      const announce = cache.district !== '';
       setText(districtEl, 'district', name);
+      if (announce) showDistrictBanner(name);
     },
     setAmmo(mag, reserve, reloading) {
       if (cache.ammo !== mag) { cache.ammo = mag; ammoMag.textContent = mag; }
@@ -180,6 +209,7 @@ export function createHud() {
       errorNote.textContent = '';
     },
     bakeMap(city) {
+      mapCity = city;
       const span = city.spec.half * 2 + 40;
       mapSpan = span;
       const scale = size / span;
@@ -207,6 +237,21 @@ export function createHud() {
       }
       off.fillStyle = '#081028';
       off.fillRect(0, toY(city.spec.waterZ - 2), size, size - toY(city.spec.waterZ - 2));
+      // District names are baked dim into the map, one per rect. The font is deliberately small:
+      // the dial blits this canvas at ~2.4x zoom, so 5px here lands around 12px on screen.
+      off.textAlign = 'center';
+      off.textBaseline = 'middle';
+      off.font = 'bold 5px ui-monospace, Menlo, monospace';
+      for (const district of city.districts ?? []) {
+        off.fillStyle = 'rgba(196,188,222,0.5)';
+        off.fillText(
+          district.name.toUpperCase(),
+          toX((district.minX + district.maxX) / 2),
+          toY((district.minZ + district.maxZ) / 2),
+        );
+      }
+      off.textAlign = 'left';
+      off.textBaseline = 'alphabetic';
       off.strokeStyle = 'rgba(53,231,255,0.25)';
       off.lineWidth = 1;
       off.strokeRect(0.5, 0.5, size - 1, size - 1);
@@ -231,6 +276,28 @@ export function createHud() {
       ctx.scale(zoom, zoom);
       ctx.drawImage(offscreen, -size / 2, -size / 2);
       ctx.restore();
+
+      // Stamp the district the player is inside brighter than its baked neighbours, at the same
+      // screen size the bake lands at, so the name under the clock and the name on the dial agree.
+      if (snapshot.district && mapCity) {
+        const district = (mapCity.districts ?? []).find((item) => item.name === snapshot.district);
+        if (district) {
+          const labelX = px((district.minX + district.maxX) / 2);
+          const labelY = py((district.minZ + district.maxZ) / 2);
+          if (labelX > -40 && labelX < size + 40 && labelY > -14 && labelY < size + 14) {
+            ctx.font = `bold ${Math.round(5 * zoom)}px ui-monospace, Menlo, monospace`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = 'rgba(53,231,255,0.96)';
+            ctx.shadowColor = 'rgba(53,231,255,0.9)';
+            ctx.shadowBlur = 7;
+            ctx.fillText(district.name.toUpperCase(), labelX, labelY);
+            ctx.shadowBlur = 0;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'alphabetic';
+          }
+        }
+      }
 
       // A faint ring marks the visible span so the map reads as a device, not a texture.
       ctx.strokeStyle = 'rgba(53,231,255,0.18)';
@@ -268,6 +335,22 @@ export function createHud() {
         ctx.fill();
         ctx.strokeStyle = 'rgba(255,255,255,0.8)';
         ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+      if (snapshot.heli) {
+        // The air unit: a hollow rotor disc with a cross, so it never reads as a ground cruiser.
+        const hx = px(snapshot.heli.x);
+        const hy = py(snapshot.heli.z);
+        ctx.strokeStyle = COLORS.policeHot;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(hx, hy, 5.6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(hx - 3, hy);
+        ctx.lineTo(hx + 3, hy);
+        ctx.moveTo(hx, hy - 3);
+        ctx.lineTo(hx, hy + 3);
         ctx.stroke();
       }
       // Wanted radius: a red arc growing with the heat, so the chase reads on the dial too.

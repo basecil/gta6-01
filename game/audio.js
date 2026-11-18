@@ -15,12 +15,17 @@ export function createAudio() {
   let engineGain = null;
   let sirenOsc = null;
   let sirenGain = null;
+  let rotorOsc = null;
+  let rotorOscGain = null;
+  let rotorNoise = null;
+  let rotorNoiseGain = null;
   let noiseBuffer = null;
   let musicTimer = null;
   let muted = false;
   let started = false;
   let station = 0;
   let engineOn = false;
+  let rotorOn = false;
   let armed = false;
   const STATIONS = ['BAY FM 88.1', 'PIER 9 SLOW', 'CHASE BED'];
 
@@ -232,6 +237,47 @@ export function createAudio() {
         } else {
           sirenGain.gain.setTargetAtTime(0, now, 0.2);
         }
+      } catch { /* silence */ }
+    },
+    // Air support: a sawtooth rotor chop over a band-passed noise bed. Built once and gain-ramped,
+    // so the heli spawn/despawn never clicks and a headless/blocked context stays silent.
+    rotorLoop(on) {
+      try {
+        if (on !== rotorOn) {
+          rotorOn = on;
+        }
+        // Same rule as siren(): never wake an AudioContext before the player interacts.
+        if (!armed && !started) return;
+        if (!ensure() || !noiseBuffer) return;
+        if (!rotorOsc) {
+          rotorOsc = ctx.createOscillator();
+          rotorOscGain = ctx.createGain();
+          rotorOsc.type = 'sawtooth';
+          rotorOsc.frequency.value = 21;
+          rotorOscGain.gain.value = 0;
+          rotorOsc.connect(rotorOscGain).connect(sfxGain);
+          rotorOsc.start();
+
+          rotorNoise = ctx.createBufferSource();
+          rotorNoise.buffer = noiseBuffer;
+          rotorNoise.loop = true;
+          const band = ctx.createBiquadFilter();
+          band.type = 'bandpass';
+          band.frequency.value = 320;
+          band.Q.value = 0.9;
+          rotorNoiseGain = ctx.createGain();
+          rotorNoiseGain.gain.value = 0;
+          rotorNoise.connect(band).connect(rotorNoiseGain).connect(sfxGain);
+          rotorNoise.start();
+        }
+        const now = ctx.currentTime;
+        const live = on && !muted;
+        const level = live ? 0.055 : 0;
+        rotorOscGain.gain.setTargetAtTime(level, now, 0.25);
+        rotorNoiseGain.gain.setTargetAtTime(live ? 0.05 : 0, now, 0.25);
+        // A slow chop in pitch, deterministic in time, so the rotor reads as a rotor not a drone.
+        const chop = live ? 18 + Math.sin(now * 8.5) * 1.6 : 16;
+        rotorOsc.frequency.setTargetAtTime(chop, now, 0.2);
       } catch { /* silence */ }
     },
     toggleMute() {

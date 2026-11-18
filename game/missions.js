@@ -1,6 +1,6 @@
-// The five-job arc. Mission 1 (Hot Cargo) is playable end to end: steal the courier car, hit three
-// drops before the timer dies, and outrun the heat. Missions 2 to 5 ship as briefings with their
-// objectives written out, so the story reads complete in the game and in the screenshots.
+// The eight-job arc. Mission 1 (Hot Cargo) and jobs 6-8 (Searchlight, Dead Water, Rooftop Getaway)
+// are playable end to end; jobs 2-5 still ship as briefings with their objectives written out, so
+// the story reads complete in the game and in the screenshots.
 // A mission is a small ordered list of stages; each stage has an objective line, a marker and a
 // predicate the runner polls, so adding a mission is data, not new control flow.
 
@@ -84,11 +84,56 @@ export const MISSIONS = [
       { id: 'extract', text: 'Reach the extraction boat at Pier 9', marker: 'pier' },
     ],
   },
+  {
+    id: 6,
+    name: 'Searchlight',
+    tag: 'Job 06 · Escape',
+    contact: 'Riva',
+    body: 'The bridge decoy worked too well. Bay PD parks an air unit over the marina, and its searchlight owns every alley you might use. Riva wants the heat dragged north, the beam killed under the arch, and the car left cold at the hideout.',
+    goal: 'Take the heat to three stars, break the searchlight under the marina arch, and ditch the car at the hideout.',
+    reward: 7200,
+    playable: true,
+    stages: [
+      { id: 'bait', text: 'Hold the air unit over the marina for six seconds', marker: 'marina', kind: 'heat', wanted: 3, hold: 6 },
+      { id: 'blind', text: 'Kill the searchlight under the marina arch', marker: 'arch' },
+      { id: 'ditch', text: 'Ditch the car at the marina hideout and go quiet', marker: 'hideout' },
+    ],
+  },
+  {
+    id: 7,
+    name: 'Dead Water',
+    tag: 'Job 07 · Heist',
+    contact: 'Mako',
+    body: 'The harbour vault is not in a bank. It is a container on the north docks, and the manifest calls it machine parts. Mako needs the gantry crane, one clear minute of gate time, and a driver who does not stall at the weighbridge.',
+    goal: 'Stage the crew at the container docks, crack the vault container, and run it to the extraction at Pier 9.',
+    reward: 11000,
+    playable: true,
+    stages: [
+      { id: 'stage', text: 'Stage the crew at the container docks', marker: 'docks' },
+      { id: 'crack', text: 'Hold the dock gate under two stars of heat', marker: 'crane', kind: 'heat', wanted: 2, hold: 5 },
+      { id: 'run', text: 'Run the container to the extraction at Pier 9', marker: 'pier' },
+    ],
+  },
+  {
+    id: 8,
+    name: 'Rooftop Getaway',
+    tag: 'Job 08 · Finale',
+    contact: 'Riva',
+    body: 'Every crew in the bay wants a cut of the harbour take, and the meet is on a roof because nobody trusts a room. Take the service ramp to the roof garage, pull the air unit away from the handoff, then vanish under the arch before the searchlight swings back.',
+    goal: 'Reach the roof garage, pull the helicopter off the meet at three stars, then go dark under the marina arch.',
+    reward: 15000,
+    playable: true,
+    stages: [
+      { id: 'roof', text: 'Take the service ramp to the roof garage', marker: 'roof' },
+      { id: 'draw', text: 'Pull the air unit off the meet — hold three stars', marker: 'helipad', kind: 'heat', wanted: 3, hold: 6 },
+      { id: 'vanish', text: 'Go dark under the marina arch before the searchlight returns', marker: 'arch', kind: 'cool', wanted: 1 },
+    ],
+  },
 ];
 
 // The static marker each job's briefing points at, so the "Close" button on an outline job can
 // still drop a mission marker in the world instead of doing nothing at all.
-export const BRIEFING_MARKERS = { 2: 'store', 3: 'docks', 4: 'casino', 5: 'bridge' };
+export const BRIEFING_MARKERS = { 2: 'store', 3: 'docks', 4: 'casino', 5: 'bridge', 6: 'marina', 7: 'docks', 8: 'roof' };
 
 function ringMesh(color, radius, height) {
   const ring = new THREE.Mesh(
@@ -115,6 +160,7 @@ export function createMissions(scene, city, options = {}) {
     markerLabel: '',
     briefingOpen: false,
     elapsed: 0,
+    holdTimer: 0,
   };
 
   const markerGroup = new THREE.Group();
@@ -144,6 +190,16 @@ export function createMissions(scene, city, options = {}) {
   for (const [key, point] of Object.entries(stops)) {
     if (point && Number.isFinite(point.x) && Number.isFinite(point.z)) targetPositions[key] = point;
   }
+  // The round-four jobs name their own stops: a marina crossroads for the air-unit bait, the arch
+  // where the searchlight dies, the roof garage and its helipad, and the docks gantry crane. Every
+  // point sits on a road line so the ring and the minimap blip are always drivable to.
+  Object.assign(targetPositions, {
+    marina: { x: 0, z: 128 },
+    arch: { x: -64, z: 96 },
+    roof: { x: 64, z: 96 },
+    helipad: { x: 128, z: 64 },
+    crane: { x: 128, z: -128 },
+  });
 
   function setMarker(key, label) {
     const point = targetPositions[key];
@@ -170,6 +226,7 @@ export function createMissions(scene, city, options = {}) {
     state.deliveries = 0;
     state.failed = false;
     state.elapsed = 0;
+    state.holdTimer = 0;
     state.completed = [];
     const stage = mission.stages[0];
     setMarker(stage.marker, stage.text);
@@ -183,6 +240,7 @@ export function createMissions(scene, city, options = {}) {
     const finished = done.stages[state.stage];
     if (finished && !state.completed.includes(finished.id)) state.completed.push(finished.id);
     state.stage += 1;
+    state.holdTimer = 0;
     const stage = state.active.stages[state.stage];
     if (!stage) {
       state.active = null;
@@ -201,6 +259,7 @@ export function createMissions(scene, city, options = {}) {
     const stage = state.active.stages[clamped];
     if (!stage) return;
     state.stage = clamped;
+    state.holdTimer = 0;
     state.completed = state.active.stages.slice(0, state.stage).map((s) => s.id);
     state.deliveries = state.completed.filter((id) => id.startsWith('drop')).length;
     setMarker(stage.marker, stage.text);
@@ -257,6 +316,26 @@ export function createMissions(scene, city, options = {}) {
         if (ctx.onDelivery) ctx.onDelivery(state.deliveries, state.active.stages.length - 1);
         completeStage(ctx);
       }
+      return;
+    }
+
+    // Pursuit stages: hold a heat level (baiting the air unit) or drop below one (going dark).
+    // Reuses the police module's wanted count through the context, so no new chase bookkeeping.
+    // A heat stage must be *held* for stage.hold seconds of simulated time, so the chase is real
+    // rather than a one-tick trigger; a cool stage completes the moment the stars fall.
+    if (stage.kind === 'heat' || stage.kind === 'cool') {
+      const wanted = ctx.wanted ? ctx.wanted() : 0;
+      let met = stage.kind === 'heat' ? wanted >= (stage.wanted ?? 3) : wanted <= (stage.wanted ?? 1);
+      // Going dark is a place as well as a heat level: the arch is where the searchlight loses you.
+      if (met && stage.kind === 'cool' && state.markerPos) {
+        met = Math.hypot(player.x - state.markerPos.x, player.z - state.markerPos.z) < 14;
+      }
+      if (!met) {
+        state.holdTimer = 0;
+        return;
+      }
+      state.holdTimer += dt;
+      if (state.holdTimer >= (stage.hold ?? 0)) completeStage(ctx);
       return;
     }
 

@@ -126,6 +126,123 @@ const world = {
   freeze: false,
 };
 
+// The air unit's searchlight rig: one SpotLight plus a visible cone, both hung off the heli's
+// `spot` anchor. They light up only when the sky is actually dark, so the cone never reads by day.
+const HELI_BEAM = { angle: 0.26, length: 78, intensity: 1500, distance: 150 };
+const heliFx = {
+  attachedSpot: null,
+  light: null,
+  target: null,
+  beam: null,
+  pool: null,
+};
+const DOWN = new THREE.Vector3(0, -1, 0);
+const beamOrigin = new THREE.Vector3();
+const beamDir = new THREE.Vector3();
+
+// A radial white-to-transparent disc for the searchlight's ground pool.
+function glowPoolTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gradient.addColorStop(0, 'rgba(255,255,255,0.85)');
+  gradient.addColorStop(0.45, 'rgba(255,255,255,0.3)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(canvas);
+}
+
+function attachHeliFx(spot) {
+  const light = new THREE.SpotLight(0xdff2ff, HELI_BEAM.intensity, HELI_BEAM.distance, HELI_BEAM.angle, 0.55, 2);
+  light.visible = false;
+  spot.add(light);
+
+  const target = new THREE.Object3D();
+  target.position.set(0, 0, 8);
+  scene.add(target);
+  light.target = target;
+
+  // An open cone with its apex at the lamp: additive, unlit, and short of the ground plane so the
+  // shaft reads as light rather than as geometry.
+  const radius = Math.tan(HELI_BEAM.angle) * HELI_BEAM.length;
+  const geometry = new THREE.ConeGeometry(radius, HELI_BEAM.length, 24, 1, true);
+  geometry.translate(0, -HELI_BEAM.length / 2, 0);
+  const material = new THREE.MeshBasicMaterial({
+    color: 0xcfeaff,
+    transparent: true,
+    opacity: 0.11,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
+    fog: false,
+  });
+  const beam = new THREE.Mesh(geometry, material);
+  beam.name = 'heli-beam';
+  beam.visible = false;
+  beam.frustumCulled = false;
+  scene.add(beam);
+
+  // A soft pool where the shaft lands, so the light reads on the road even on a bright neon block.
+  const poolGeo = new THREE.PlaneGeometry(26, 26);
+  poolGeo.rotateX(-Math.PI / 2);
+  const pool = new THREE.Mesh(poolGeo, new THREE.MeshBasicMaterial({
+    map: glowPoolTexture(),
+    transparent: true,
+    opacity: 0.3,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
+    fog: false,
+  }));
+  pool.name = 'heli-pool';
+  pool.visible = false;
+  scene.add(pool);
+
+  heliFx.attachedSpot = spot;
+  heliFx.light = light;
+  heliFx.target = target;
+  heliFx.beam = beam;
+  heliFx.pool = pool;
+}
+
+// Runs every rendered frame, not just simulated ones, so the searchlight follows the player even
+// when the world is frozen for a capture. Rotor angles come from game.simTime, so a frozen shot
+// renders the same blades every run.
+function updateHeliFx() {
+  const heli = world.police?.state.heli ?? null;
+  hud.setAirSupport(Boolean(heli));
+  world.audio?.rotorLoop?.(Boolean(heli));
+  if (!heli) {
+    if (heliFx.light) heliFx.light.visible = false;
+    if (heliFx.beam) heliFx.beam.visible = false;
+    if (heliFx.pool) heliFx.pool.visible = false;
+    return;
+  }
+  if (heliFx.attachedSpot !== heli.spot) attachHeliFx(heli.spot);
+
+  heli.rotor.rotation.y = (game.simTime * 26) % TAU;
+  heli.tailRotor.rotation.x = (game.simTime * 41) % TAU;
+
+  const aim = player.inCar ?? player;
+  const night = game.night > 0.5;
+  heliFx.light.visible = night;
+  heliFx.beam.visible = night;
+  heliFx.pool.visible = night;
+  if (!night) return;
+
+  heliFx.target.position.set(aim.x, 0.9, aim.z);
+  heliFx.target.updateMatrixWorld();
+  heli.spot.getWorldPosition(beamOrigin);
+  beamDir.set(aim.x - beamOrigin.x, 0.9 - beamOrigin.y, aim.z - beamOrigin.z).normalize();
+  heliFx.beam.position.copy(beamOrigin);
+  heliFx.beam.quaternion.setFromUnitVectors(DOWN, beamDir);
+  heliFx.pool.position.set(aim.x, 0.06, aim.z);
+}
+
 function makeCourier() {
   const spot = missions.courierPoint;
   const car = createVehicle(scene, city, {
@@ -229,7 +346,7 @@ const game = {
   shake: 0,
   hurt: 0,
   hint: '',
-  district: 'Marina',
+  district: 'Beachfront',
   pointerLocked: false,
   titleYaw: 0.6,
   shotName: SHOT,
@@ -238,6 +355,7 @@ const game = {
   demoTurn: 0,
   demoRestart: 0,
   wantedFallback: 0,
+  night: 0,
 };
 
 const cam = {
@@ -257,6 +375,7 @@ const menu = createMenu({
   onContinue: () => continueGame(),
   onDemo: () => startDemo(),
   onBriefingGo: () => acceptBriefing(),
+  onPickJob: (index) => pickJob(index),
   onBriefingLater: () => backToTitle(),
   onResume: () => resumeGame(),
   onQuit: () => quitToTitle(),
@@ -370,6 +489,14 @@ function acceptBriefing() {
     return;
   }
   startMission(game.missionIndex);
+}
+
+// The briefing's job board: picking a row swaps the card to that job and makes it the next accept.
+function pickJob(index) {
+  if (!MISSIONS[index]) return;
+  game.missionIndex = index;
+  game.mode = 'briefing';
+  menu.showBriefing(MISSIONS[index]);
 }
 
 function backToTitle() {
@@ -502,10 +629,14 @@ function missionCtx() {
     player,
     courierCar: world.courier,
     city,
-    onBegin: () => {
+    // Pursuit stages read the live star count instead of tracking their own chase state.
+    wanted: () => world.police?.state.wanted ?? game.wantedFallback,
+    onBegin: (mission, stage) => {
+      seedChase(stage);
       syncObjective();
     },
     onStage: (mission, stage) => {
+      seedChase(stage);
       hud.toast(stage.text, 'good');
       syncObjective();
     },
@@ -552,6 +683,15 @@ function missionCtx() {
       game.mode = 'end';
     },
   };
+}
+
+// A pursuit stage starts with the heat already on the player: the air unit is over the marina
+// before job 6 opens, and the dock alarm brings the cruisers for job 7.
+function seedChase(stage) {
+  if (stage?.kind === 'heat' && world.police) {
+    world.police.setWanted(stage.wanted ?? 3);
+    game.wantedFallback = world.police.state.wanted;
+  }
 }
 
 function syncObjective() {
@@ -1054,6 +1194,7 @@ function applyTimeOfDay() {
   // between dusk and deep night so a 19:48 shot and a 23:12 shot read differently.
   const minutes = ((game.clock % 1440) + 1440) % 1440;
   const night = clamp((minutes - 18 * 60) / (5 * 60), 0, 1);
+  game.night = night;
   if (!city.lights) return;
   city.lights.hemi.intensity = 1.3 - night * 0.36;
   city.lights.moon.intensity = 0.92 - night * 0.26;
@@ -1062,13 +1203,10 @@ function applyTimeOfDay() {
   renderer.toneMappingExposure = 1.1 - night * 0.12;
 }
 
+// Districts are real geography now: the tiling lives in city.js (DISTRICTS) and every point in
+// the map resolves to exactly one of the five names. No more per-frame string heuristics.
 function districtAt(x, z) {
-  if (z > 120) return 'Marina · Pier 9';
-  if (z > 60) return 'Marina';
-  if (x > 70 && z < 40) return 'The Docks';
-  if (x < -70) return 'West Strip';
-  if (Math.abs(x) < 75 && Math.abs(z) < 75) return 'Downtown · Neon Arch';
-  return 'Neon Bay';
+  return city.districtAt(x, z);
 }
 
 function wantedLevel() {
@@ -1115,6 +1253,7 @@ function updateHud() {
   game.hint = hint;
 
   const dropList = missions.state.active ? city.map.drops : [];
+  const heli = police?.state.heli ?? null;
   const policeBlips = police
     ? police.state.units.filter((u) => !u.dead).map((u) => ({ x: u.x, z: u.z, hot: wantedLevel() >= 3 }))
         .concat(police.state.officers.filter((o) => !o.down).map((o) => ({ x: o.x, z: o.z, hot: wantedLevel() >= 3 })))
@@ -1125,8 +1264,10 @@ function updateHud() {
     police: policeBlips,
     marker: missions.state.active ? missions.markerInfo() : null,
     drops: dropList,
+    heli: heli ? { x: heli.x, z: heli.z, heading: heli.mesh.rotation.y } : null,
     hideout: city.map.hideout,
     showHideout: true,
+    district: game.district,
     zoom: car ? 190 : 150,
   });
 }
@@ -1250,7 +1391,7 @@ function stageShot(name) {
       pos: new THREE.Vector3(8.6, 4.4, 158),
       look: new THREE.Vector3(2.4, 1.15, 138),
     };
-    hud.toast('Downtown at dusk · coupe on the main drag', 'good');
+    hud.toast('Beachfront at dusk · coupe on the main drag', 'good');
   } else if (name === 'chase') {
     game.cash = 8450;
     player.cash = 8450;
@@ -1267,7 +1408,7 @@ function stageShot(name) {
     missions.begin(0, missionCtx());
     missions.forceStage(1);
     if (world.police) {
-      world.police.state.wanted = 3;
+      world.police.setWanted(3);
       game.wantedFallback = 3;
       world.police.state.spawnCooldown = 8;
       const unit = world.police.spawnUnit(player, 0, 12);
@@ -1276,6 +1417,9 @@ function stageShot(name) {
       unit.sync();
       world.police.spawnOfficer(2.6, 58.5, Math.PI * 0.92);
       world.police.spawnOfficer(-6.2, 56.5, Math.PI * 0.78);
+      // The world is frozen in a shot, so the orbit tick never runs: place the air unit by hand,
+      // north-east of the player with its nose on them, and let the beam hang off its nose.
+      world.police.syncHeli(player, -2.6);
     } else {
       // Core-only fallback still has to *read* as a chase: the stars and the ring live in the HUD,
       // the cruisers are the optional half.
@@ -1294,8 +1438,8 @@ function stageShot(name) {
     missions.setMarker('drop0', 'Drop 1 of 3');
     syncObjective();
     world.shotView = {
-      pos: new THREE.Vector3(7.6, 3.4, 72.5),
-      look: new THREE.Vector3(-1.2, 1.15, 56),
+      pos: new THREE.Vector3(0, 9, 108),
+      look: new THREE.Vector3(-2, 24, 42),
     };
     hud.toast('On foot · 3 stars · bay PD on you', 'warn');
   } else if (name === 'briefing') {
@@ -1310,7 +1454,7 @@ function stageShot(name) {
       { x: -11, z: 152, heading: 3.3 },
     ]);
     game.mode = 'briefing';
-    menu.showBriefing(MISSIONS[2]);
+    menu.showBriefing(MISSIONS[7]);
     document.getElementById('briefing')?.classList.add('shot-briefing');
     missions.state.active = null;
     hud.setObjective('', '');
@@ -1553,6 +1697,7 @@ function frame(now) {
 
   updateCamera(dt);
   applyTimeOfDay();
+  updateHeliFx();
   missions.animate(game.simTime + raw);
   updateHud();
   if (world.police && world.police.state.wanted > 0) world.audio?.siren?.(true);

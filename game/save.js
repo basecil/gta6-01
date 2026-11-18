@@ -4,11 +4,11 @@
 //
 // v2 stores the clock in minutes (v1 wrote a 0..1 fraction, which loaders silently ignored) and
 // keeps a version tag so an old slot migrates instead of being thrown away. The mission index is
-// clamped to the arc's five jobs, and a slot is only offered to "Continue" when it parses.
+// clamped to the arc's eight jobs, and a slot is only offered to "Continue" when it parses.
 
 const KEY = 'neonbay.save.v1';
 const VERSION = 2;
-const ARC_LENGTH = 5;
+const ARC_LENGTH = 8;
 export const DEFAULT_CLOCK = 21 * 60 + 40;
 
 function toNumber(value, fallback) {

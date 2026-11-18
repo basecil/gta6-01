@@ -129,8 +129,79 @@
   #stars span.on { color: var(--amber); text-shadow: 0 0 10px rgba(255, 194, 92, 0.85); }
   #stars.alert span.on { animation: starPulse 900ms ease-in-out infinite alternate; }
   @keyframes starPulse { from { opacity: 0.55; } to { opacity: 1; } }
+
+  /* AIR SUPPORT chip: appears under the stars only while the 3-star heli is on station. */
+  #air-support {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    padding: 3px 9px;
+    border: 1px solid rgba(255, 95, 122, 0.55);
+    border-radius: 999px;
+    background: rgba(255, 47, 82, 0.12);
+    font-family: var(--font-readout);
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #ff8ea0;
+  }
+  #air-support::before {
+    content: '';
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #ff2f52;
+    box-shadow: 0 0 8px rgba(255, 47, 82, 0.95);
+    animation: starPulse 700ms ease-in-out infinite alternate;
+  }
+  #air-support[hidden] { display: none; }
   #clock { font-family: var(--font-readout); font-size: 26px; letter-spacing: 0.02em; margin-top: 10px; }
   #district { font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--pink); margin-top: 2px; }
+
+  /* District entry banner: a wide title card under the top HUD, fades in for ~3 s on a crossing.
+     hud.js only toggles .on, so the animation stays off the main thread and costs no per-frame work. */
+  #district-banner {
+    position: absolute;
+    left: 50%;
+    top: 84px;
+    transform: translate(-50%, -6px);
+    padding: 8px 30px 9px;
+    border-top: 1px solid rgba(255, 62, 165, 0.45);
+    border-bottom: 1px solid rgba(53, 231, 255, 0.45);
+    background: linear-gradient(90deg, transparent, rgba(9, 7, 20, 0.72) 18%, rgba(9, 7, 20, 0.72) 82%, transparent);
+    font-family: var(--font-readout);
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: 0.34em;
+    text-indent: 0.34em;
+    text-transform: uppercase;
+    color: var(--ink);
+    text-shadow: 0 0 18px rgba(53, 231, 255, 0.55), 0 0 34px rgba(255, 62, 165, 0.35);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 420ms ease, transform 420ms ease, visibility 0s linear 420ms;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  #district-banner.on {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, 0);
+    transition: opacity 420ms ease, transform 420ms ease, visibility 0s;
+  }
+  #district-banner::after {
+    content: 'Now entering';
+    display: block;
+    margin-top: 3px;
+    font-size: 8px;
+    font-weight: 400;
+    letter-spacing: 0.42em;
+    text-indent: 0.42em;
+    color: var(--muted);
+    text-shadow: none;
+  }
+  html[data-shot] #district-banner { display: none !important; }
 
   #objective-panel {
     position: absolute;
@@ -456,7 +527,29 @@
   }
   .brief-step span { flex: 1; }
   .overlay-wide .panel { width: min(760px, 100%); }
-  .shot-briefing .panel { width: min(480px, 46vw); margin-right: auto; margin-left: 5vw; }
+  /* The briefing is the arce board: eight job rows on the left, the selected job's card on the
+     right. It stays readable at the title width and widens a little for the staged shot. */
+  .briefing-shell { display: grid; grid-template-columns: minmax(136px, 0.72fr) 1.45fr; gap: 20px; align-items: start; }
+  .job-board { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .job-board-head { font-family: var(--font-readout); font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+  .job-row {
+    display: grid; grid-template-columns: 20px 1fr; grid-template-rows: auto auto; column-gap: 7px;
+    padding: 5px 7px; text-align: left; cursor: pointer; min-width: 0;
+    background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.07);
+    border-left: 2px solid transparent; border-radius: 6px; color: var(--muted);
+    font: inherit; font-size: 11.5px; transition: background-color 120ms ease, border-color 120ms ease;
+  }
+  .job-row i { grid-row: span 2; font-family: var(--font-readout); font-style: normal; font-size: 9px; letter-spacing: 0.06em; color: var(--muted); padding-top: 1px; }
+  .job-row .job-name { font-weight: 600; color: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .job-row em { font-style: normal; font-family: var(--font-readout); font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase; opacity: 0.65; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .job-row:hover { background: rgba(255, 62, 165, 0.10); border-color: rgba(255, 62, 165, 0.35); }
+  .job-row.is-active { background: rgba(53, 231, 255, 0.10); border-color: rgba(53, 231, 255, 0.55); border-left-color: var(--cyan); color: var(--ink); }
+  .job-row.is-active i, .job-row.is-active em { color: var(--cyan); opacity: 0.9; }
+  .briefing-card { min-width: 0; }
+  #briefing-contact { font-family: var(--font-readout); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--amber); margin: -4px 0 8px; }
+  .shot-briefing .panel { width: min(640px, 56vw); margin-right: auto; margin-left: 4vw; padding: 24px 24px 22px; }
+  .shot-briefing .panel h2 { font-size: 26px; }
+  .shot-briefing .job-row { padding: 4px 6px; font-size: 11px; }
   .shot-briefing { place-items: center start; background: linear-gradient(90deg, rgba(5,4,12,0.62) 0%, rgba(5,4,12,0.28) 55%, transparent 100%); backdrop-filter: none; }
   .overlay-clear { background: rgba(5, 4, 12, 0.35); backdrop-filter: none; }
   .overlay-clear .panel { background: linear-gradient(160deg, rgba(22, 16, 40, 0.82), rgba(9, 8, 18, 0.82)); }
@@ -521,8 +614,9 @@
       <span class="hud-label">Wanted</span>
       <span id="stars"><span>★</span><span>★</span><span>★</span><span>★</span><span>★</span></span>
     </div>
+    <div id="air-support" hidden>Air support</div>
     <div id="clock">21:40</div>
-    <div id="district">Neon Bay · Marina</div>
+    <div id="district">Beachfront</div>
   </div>
 
   <div id="objective-panel" class="hud-panel" hidden>
@@ -560,6 +654,7 @@
     <div id="speed-unit">km/h</div>
   </div>
 
+  <div id="district-banner" aria-hidden="true"></div>
   <div id="reticle"><i></i><i></i><i></i><i></i><u></u></div>
   <div id="hitmarker" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
   <div id="mode-badge" hidden>Demo</div>
@@ -587,13 +682,31 @@
 
 <div id="briefing" class="overlay" hidden>
   <section class="panel" role="dialog" aria-modal="true" aria-labelledby="briefing-title">
-    <div class="kicker" id="briefing-tag">Mission briefing</div>
-    <h2 id="briefing-title">Hot Cargo</h2>
-    <div class="briefing-grid">
-      <p id="briefing-body">A courier van is sitting on the marina lot with a load of bootleg chips. Move it before the harbour crew wakes up.</p>
-      <div class="briefing-goal"><b>Objective</b><span id="briefing-goal">Reach the pickup, then hit every drop before the timer dies.</span></div>
-      <ol id="briefing-steps" class="brief-steps"></ol>
-      <div class="briefing-reward" id="briefing-reward">Reward $1,500</div>
+    <div class="briefing-shell">
+      <nav class="job-board" aria-label="Story jobs">
+        <div class="job-board-head">The arc · 8 jobs</div>
+        <div id="job-list" class="job-board-list">
+          <button class="job-row is-active" type="button" data-id="1"><i>01</i><span class="job-name">Hot Cargo</span><em>Courier</em></button>
+          <button class="job-row" type="button" data-id="2"><i>02</i><span class="job-name">Green Light</span><em>Getaway</em></button>
+          <button class="job-row" type="button" data-id="3"><i>03</i><span class="job-name">Undertow</span><em>Muscle</em></button>
+          <button class="job-row" type="button" data-id="4"><i>04</i><span class="job-name">Low Tide</span><em>Setup</em></button>
+          <button class="job-row" type="button" data-id="5"><i>05</i><span class="job-name">High Water</span><em>Heist</em></button>
+          <button class="job-row" type="button" data-id="6"><i>06</i><span class="job-name">Searchlight</span><em>Escape</em></button>
+          <button class="job-row" type="button" data-id="7"><i>07</i><span class="job-name">Dead Water</span><em>Heist</em></button>
+          <button class="job-row" type="button" data-id="8"><i>08</i><span class="job-name">Rooftop Getaway</span><em>Finale</em></button>
+        </div>
+      </nav>
+      <div class="briefing-card">
+        <div class="kicker" id="briefing-tag">Mission briefing</div>
+        <h2 id="briefing-title">Hot Cargo</h2>
+        <div id="briefing-contact">Contact · Riva</div>
+        <div class="briefing-grid">
+          <p id="briefing-body">A courier van is sitting on the marina lot with a load of bootleg chips. Move it before the harbour crew wakes up.</p>
+          <div class="briefing-goal"><b>Objective</b><span id="briefing-goal">Reach the pickup, then hit every drop before the timer dies.</span></div>
+          <ol id="briefing-steps" class="brief-steps"></ol>
+          <div class="briefing-reward" id="briefing-reward">Reward $1,500</div>
+        </div>
+      </div>
     </div>
     <div class="menu-buttons" style="margin-top: 18px">
       <button id="btn-briefing-go" class="btn primary" type="button">Let's ride <small>Enter</small></button>
