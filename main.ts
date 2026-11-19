@@ -15,7 +15,8 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildDossier } from './vendor/makefun-threejs.ts';
+// gta6-01 kit library, kept byte-for-byte identical to the kit's copy
+import { buildDossier } from './vendor/makefun-game.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const out = resolve(process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
